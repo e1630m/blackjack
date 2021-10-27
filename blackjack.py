@@ -1,3 +1,4 @@
+from hashlib import sha512
 from random import shuffle, uniform
 from os import system, name, get_terminal_size as tsize
 from time import sleep
@@ -7,11 +8,12 @@ class Card(object):
     sdict = {'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣'}
     color = {'r': '\033[1;31;49m', 'w': '\033[1;37;49m'}
 
-    def __init__(self, suit, rank, uid):
+    def __init__(self, suit, rank, uid, hash):
         self.suit = suit
         self.symbol = Card.sdict[suit[0]]
         self.rank = rank
         self.uid = uid
+        self.hash = hash
         self.is_red = self.suit[0] in 'HD'
         self.value = 10 + (rank[0] == 'A') if rank.isalpha() else int(rank)
 
@@ -39,6 +41,9 @@ class Card(object):
 
     def get_uid(self) -> int:
         return self.uid
+
+    def get_hash(self) -> str:
+        return self.hash
 
     def get_value(self) -> int:
         return self.value
@@ -75,8 +80,8 @@ class Card(object):
 class Shoe(object):
     def __init__(self, num_decks=6, vb=False):
         print(f'Generating a dealing shoe with {num_decks} decks', end='')
-        self.last = 0
-        self.shoe = self.build_shoe(num_decks)
+        self.shoe, self.last = [], 0
+        self.build_shoe(num_decks)
 
         print('\nShuffling the cards...' if vb else '', end='')
         shuffle(self.shoe)
@@ -87,16 +92,13 @@ class Shoe(object):
               f'({len(self.shoe)} cards remaining)' if vb else '', end='')
         print()
 
-    def build_shoe(self, num_decks: int) -> list[Card]:
-        suits = 'Spade Heart Diamond Club'.split()
-        ranks = 'Ace 2 3 4 5 6 7 8 9 10 Jack Queen King'.split()
-        shoe = []
+    def build_shoe(self, num_decks: int) -> None:
         for _ in range(num_decks):
-            for suit in suits:
-                for rank in ranks:
+            for s in 'Spade Heart Diamond Club'.split():
+                for r in 'Ace 2 3 4 5 6 7 8 9 10 Jack Queen King'.split():
                     self.last += 1
-                    shoe.append(Card(suit, rank, self.last))
-        return shoe
+                    hash = sha512((s + r + str(self.last)).encode('utf-8'))
+                    self.shoe.append(Card(s, r, self.last, hash.hexdigest()))
 
     def cut_deck(self, minimum=0.30, maximum=0.50) -> None:
         cut = uniform(minimum, maximum)
@@ -109,19 +111,17 @@ class Shoe(object):
         return len(self.shoe)
 
     def deal(self, num_cards=1) -> list[Card]:
-        cards = []
-        for _ in range(num_cards):
-            cards.append(self.shoe.pop(0))
-        return cards
+        return [self.shoe.pop(0) for _ in range(num_cards)]
 
 
 class Hand(object):
     def __init__(self, hand=None):
         self.hand = [] if hand is None else hand
-        self.total_value = sum(c.get_value() for c in self.hand) if self.hand else 0
-        self.num_aces = sum(c.get_value() == 11 for c in self.hand) if self.hand else 0
-        self.hand_value = 0
-        self.set_hand_value()
+        self.total_value = self.hand_value = self.num_aces = 0
+        if self.hand:
+            self.total_value = sum(c.get_value() for c in self.hand)
+            self.num_aces = sum(c.get_value() == 11 for c in self.hand)
+        self.set_hvalue()
         self.decision = ''
 
     def add_cards(self, cards: list[Card]) -> None:
@@ -129,7 +129,7 @@ class Hand(object):
             self.hand.append(card)
             self.total_value += (v := card.get_value())
             self.num_aces += 1 if v == 11 else 0
-            self.set_hand_value()
+        self.set_hvalue()
 
     def get_hand(self) -> list[Card]:
         return self.hand
@@ -139,16 +139,14 @@ class Hand(object):
                  for i, c in enumerate(self.hand)]
         return ['   '.join(c[i] for c in cards) for i in range(len(cards[0]))]
 
-    def get_hand_value(self) -> int:
+    def get_hvalue(self) -> int:
         return self.hand_value
 
-    def set_hand_value(self) -> None:
-        if self.total_value <= 21:
-            self.hand_value = self.total_value
+    def set_hvalue(self) -> None:
         t, n = self.total_value, self.num_aces
-        while n and t > 21:
-            n -= 1
+        while t > 21 and n:
             t -= 10
+            n -= 1
         self.hand_value = t
 
     def get_decision(self) -> str:
@@ -161,16 +159,17 @@ class Hand(object):
         return len(self.hand)
 
     def is_busted(self) -> bool:
-        return self.get_hand_value() > 21
+        return self.get_hvalue() > 21
 
     def is_blackjack(self) -> bool:
         return self.length() == 2 and self.hand_value == 21
 
     def is_playable(self) -> bool:
-        return not (self.get_hand_value() >= 21 or self.decision in ('s', 'dd'))
+        return not (self.get_hvalue() >= 21 or self.decision in ('s', 'dd'))
 
     def is_splittable(self) -> bool:
-        return self.length() == 2 and self.hand[0].get_value() == self.hand[1].get_value()
+        return self.length() == 2 and (self.hand[0].get_value() 
+                                    == self.hand[1].get_value())
 
 
 class Blackjack(object):
@@ -179,24 +178,22 @@ class Blackjack(object):
         self.cls()
         print('\033[1;37;49mWelcome to the game of Blackjack', end='')
         self.shoe = self.generate_shoe()
-        self.bankroll = self.get_int_input(
+        self.bankroll = self.get_i(
             f'\nEnter your bankroll [$100-$100m] (Default: ${50_000:,}): ',
             int(1e8), 100, 50_000)
         self.min_bet = max(5, self.bankroll // 1000 // 1000 * 1000)
+        self.bet = self.initial_bet = self.num_round = 0
         self.dealer = Hand()
         self.player = [Hand()]
-        self.bet = 0
-        self.initial_bet = 0
-        self.num_round = 0
         self.play()
 
     def generate_shoe(self) -> Shoe:
         d = 6
         msg = f'\nEnter the number of decks [2-12] (Default: {d}): '
-        return Shoe(self.get_int_input(msg, 12, 2, d), vb=True)
+        return Shoe(self.get_i(msg, 12, 2, d), vb=True)
 
     @staticmethod
-    def get_int_input(msg: str, hi=6, lo=2, default=6) -> int:
+    def get_i(msg: str, hi=6, lo=2, default=6) -> int:
         user_input = lo - 1
         while user_input < lo or user_input > hi:
             try:
@@ -209,7 +206,7 @@ class Blackjack(object):
         return user_input
 
     @staticmethod
-    def get_bool_input(msg: str, opt='YN') -> bool:
+    def get_b(msg: str, opt='YN') -> bool:
         user_input = '1'
         while user_input.upper()[0] not in opt:
             user_input = input(msg)
@@ -218,7 +215,7 @@ class Blackjack(object):
         return user_input.upper().startswith('Y')
 
     @staticmethod
-    def take_decision(hand: Hand, msg: str, possibles: list[str]) -> None:
+    def take_decision(hand: Hand, hnum: str, possibles: list[str]) -> None:
         decision = ''
         if hand.length() > 2:
             del possibles[2:]
@@ -226,21 +223,21 @@ class Blackjack(object):
             del possibles[3:]
         opt = '/'.join(c if i else c.upper() for i, c in enumerate(possibles))
         while decision[:2].lower() not in possibles:
-            decision = input(msg + '[' + opt + ']: ')
+            decision = input(f'Enter your decision {hnum}[{opt}]: ')
             decision = possibles[0] if decision == '' else decision
         hand.set_decision(decision)
 
     def take_bet(self) -> None:
         d = max(self.min_bet, self.bankroll // 1000 // 1000 * 10)
         msg = f'Place your bet (Default: ${d}): '
-        self.bet = self.get_int_input(msg, hi=self.bankroll, lo=self.min_bet, default=d)
+        self.bet = self.get_i(msg, self.bankroll, self.min_bet, d)
         self.initial_bet = self.bet
         self.bankroll -= self.bet
 
     def get_insurance_premium(self) -> int:
         premium = 0
         if self.dealer.get_hand()[0].get_rank().startswith('A'):
-            if self.get_bool_input('Do you want to take an insurance [y/N]? ', 'NY'):
+            if self.get_b('Do you want to take an insurance [y/N]? ', 'NY'):
                 premium = self.initial_bet // 2
                 self.bankroll -= premium
         return premium
@@ -249,25 +246,25 @@ class Blackjack(object):
         self.cls()
         width = tsize()[0]
         print(f'Bet: {self.bet:,}'.ljust((w := width // 3))
-              + f'Round {self.num_round}'.center(w)
-              + f'Bankroll: {self.bankroll:,}'.rjust(w))
+            + f'Round {self.num_round}'.center(w)
+            + f'Bankroll: {self.bankroll:,}'.rjust(w))
 
         print(f'\n\nDealer'
-              + (rv > 0) * f': {" ".join([str(c) for c in self.dealer.get_hand()][:rv])}'
-              + (rv > 1) * f' ({self.dealer.get_hand_value()})')
+            + (rv > 0) * f': {" ".join([str(c) for c in self.dealer.get_hand()][:rv])}'
+            + (rv > 1) * f' ({self.dealer.get_hvalue()})')
         print('\n'.join([line for line in self.dealer.get_printable(rv)]))
 
         for i, h in enumerate(self.player):
-            n = f'{(" (Hand " + str(i + 1) + ")") * (len(self.player) > 1)}'
-            print(f'\nPlayer{n}: {" ".join([str(card) for card in h.get_hand()])}'
-                  f' ({h.get_hand_value()})')
+            num = f' (Hand {i + 1})' * (len(self.player) > 1)
+            print(f'\nPlayer{num}: {" ".join([str(c) for c in h.get_hand()])}'
+                  f' ({h.get_hvalue()})')
             print('\n'.join([line for line in h.get_printable()]))
 
     def get_payout(self) -> int:
-        payout, dv, lp = 0, self.dealer.get_hand_value(), len(self.player)
+        payout, dv, lp = 0, self.dealer.get_hvalue(), len(self.player)
         for i, h in enumerate(self.player):
             n = f'Hand {i + 1}' if lp > 1 else 'You'
-            hv, dd = h.get_hand_value(), 1 + (1 * (h.get_decision() == 'dd'))
+            hv, dd = h.get_hvalue(), 1 + (1 * (h.get_decision() == 'dd'))
             if h.is_busted() or hv < dv <= 21:
                 print(f'{n} lose')
                 continue
@@ -290,23 +287,23 @@ class Blackjack(object):
         self.take_bet()
         self.dealer.__init__(self.shoe.deal(2))
         self.player = [Hand(self.shoe.deal(2))]
-        
-        if not self.player[0].is_blackjack():
-            while any(h.is_playable() for h in self.player):
-                for i, hand in enumerate(self.player):
-                    if not hand.is_playable():
-                        continue
-                    self.print_board(rv=0)
-                    s = f'(Hand {i + 1}) ' * (len(self.player) > 1)
-                    self.take_decision(hand, f'Enter your decision {s}', 'h s dd sp'.split())
-                    if (d := hand.get_decision()) != 's':
-                        self.bankroll -= self.initial_bet if d in ('dd', 'sp') else 0
-                        self.bet += self.initial_bet if d in ('dd', 'sp') else 0
-                        if d == 'sp':
-                            self.player += [Hand([hand.get_hand()[0]]), Hand([hand.get_hand()[1]])]
-                            del self.player[i]
-                            break
-                        hand.add_cards(self.shoe.deal(1))
+
+        while any(hand.is_playable() for hand in self.player):
+            for i, h in enumerate(self.player):
+                if not h.is_playable():
+                    continue
+                self.print_board(rv=0)
+                h_num = f'(Hand {i + 1}) ' * (len(self.player) > 1)
+                self.take_decision(h, h_num, 'h s dd sp'.split())
+                if (d := h.get_decision()) != 's':
+                    if d in ('dd', 'sp'):
+                        self.bankroll -= self.initial_bet
+                        self.bet += self.initial_bet
+                    if d == 'sp':
+                        self.player += [Hand([c]) for c in h.get_hand()]
+                        del self.player[i]
+                        break
+                    h.add_cards(self.shoe.deal(1))
 
         in_play = not all(h.is_busted() for h in self.player)
         self.print_board(rv=1)
@@ -314,7 +311,7 @@ class Blackjack(object):
         premium = self.get_insurance_premium() if in_play else 0
         self.print_board()
 
-        while self.dealer.get_hand_value() < 17 and in_play:
+        while self.dealer.get_hvalue() < 17 and in_play:
             self.dealer.add_cards(self.shoe.deal(1))
             sleep(0.5)
             self.print_board()
@@ -331,11 +328,11 @@ class Blackjack(object):
         while more and self.bankroll >= self.min_bet:
             self.num_round += 1
             self.round()
-            more = self.get_bool_input('Do you want to play more rounds [Y/n]? ', 'YN')
+            more = self.get_b('Do you want to play more rounds [Y/n]? ', 'YN')
             if (ls := self.shoe.get_length()) < 15:
                 msg = f"Only {ls} cards left in dealer's shoe. "
                 msg += "Do you want to replenish the shoe [Y/n]? "
-                if self.get_bool_input(msg, 'YN'):
+                if self.get_b(msg, 'YN'):
                     self.shoe = self.generate_shoe()
                 else:
                     print("Game Over (too few cards remaining)")
