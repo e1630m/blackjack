@@ -4,7 +4,7 @@ from time import sleep
 
 
 class Card(object):
-    sdict = {'S': '♤', 'H': '♡', 'D': '♢', 'C': '♧'}
+    sdict = {'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣'}
     color = {'r': '\033[1;31;49m', 'w': '\033[1;37;49m'}
 
     def __init__(self, suit, rank, uid):
@@ -45,10 +45,9 @@ class Card(object):
 
     def display(self, hide=0) -> list[str]:
         if hide:
-            lines = ['┏━━━━━━━━━━━┓' if not i else
-                     '┃███████████┃' if i != 10 else
-                     '┗━━━━━━━━━━━┛' for i in range(11)]
-            return lines
+            return ['┏━━━━━━━━━━━┓' if not i else
+                    '┃███████████┃' if i != 10 else
+                    '┗━━━━━━━━━━━┛' for i in range(11)]
         pad = ' ' * (self.get_rank() != '10')
         is_alpha = self.get_rank().isalpha()
         sym, val = self.get_symbol(1) + ' ', self.get_value()
@@ -59,7 +58,7 @@ class Card(object):
         row_2dn = (sym * (val in (8, 10) and not is_alpha)).ljust(2)
         corners = (sym * (val > 3 and not is_alpha)).ljust(2)
         top_bot = (sym * (val in (2, 3))).ljust(2)
-        lines = [
+        return [
             '┏━━━━━━━━━━━┓',
             '┃{}         ┃'.format(self.get_rank(1) + pad),
             '┃  {} {} {} ┃'.format(corners, top_bot, corners),
@@ -70,41 +69,38 @@ class Card(object):
             '┃     {}    ┃'.format(row_2dn),
             '┃  {} {} {} ┃'.format(corners, top_bot, corners),
             '┃         {}┃'.format(pad + self.get_rank(1)),
-            '┗━━━━━━━━━━━┛'
-        ]
-        return lines
+            '┗━━━━━━━━━━━┛']
 
 
 class Shoe(object):
     def __init__(self, num_decks=6, vb=False):
         print(f'Generating a dealing shoe with {num_decks} decks', end='')
+        self.last = 0
         self.shoe = self.build_shoe(num_decks)
 
         print('\nShuffling the cards...' if vb else '', end='')
         shuffle(self.shoe)
 
         print('\nGenerating a random cut' if vb else '', end='')
-        self.shoe = self.cut_deck(self.shoe)
+        self.cut_deck()
         print(f'\nRemoved {52 * num_decks - len(self.shoe)} cards '
               f'({len(self.shoe)} cards remaining)' if vb else '', end='')
         print()
 
-    @staticmethod
-    def build_shoe(num_decks: int) -> list[Card]:
+    def build_shoe(self, num_decks: int) -> list[Card]:
         suits = 'Spade Heart Diamond Club'.split()
         ranks = 'Ace 2 3 4 5 6 7 8 9 10 Jack Queen King'.split()
         shoe = []
         for _ in range(num_decks):
             for suit in suits:
                 for rank in ranks:
-                    shoe.append(Card(suit, rank, len(shoe)))
+                    self.last += 1
+                    shoe.append(Card(suit, rank, self.last))
         return shoe
 
-    @staticmethod
-    def cut_deck(shoe: list[Card], minimum=0.30, maximum=0.50) -> list[Card]:
+    def cut_deck(self, minimum=0.30, maximum=0.50) -> None:
         cut = uniform(minimum, maximum)
-        del shoe[:int(len(shoe) * cut)]
-        return shoe
+        del self.shoe[:int(len(self.shoe) * cut)]
 
     def get_shoe(self) -> list[Card]:
         return self.shoe
