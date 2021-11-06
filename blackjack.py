@@ -121,13 +121,20 @@ class Hand:
             n -= 1
         self.__value = t
 
-    @property
-    def decision(self) -> str:
-        return self.__decision
+    def get_decision(self) -> str:
+        return self.decision
 
-    @decision.setter
-    def decision(self, decision: str) -> None:
-        self.__decision = decision
+    def set_decision(self, hnum: str, opt: list[str]) -> None:
+        if self.len() > 2:
+            del opt[2:]
+        elif not self.is_splittable():
+            del opt[3:]
+        o = '/'.join(c if i else c.upper() for i, c in enumerate(opt))
+        decision = ''
+        while decision[:2].lower() not in opt:
+            decision = input(f'Enter your decision {hnum}[{o}]: ')
+            decision = opt[0] if decision == '' else decision
+        self.decision = decision
 
     def len(self) -> int:
         return len(self.hand)
@@ -151,11 +158,11 @@ class Blackjack:
         self.cls()
         print('\033[1;37;49mWelcome to the game of Blackjack', end='')
         self.shoe = self.generate_shoe()
-        self.bankroll = self.get_i(
+        self.br = self.get_i(
             f'\nEnter your bankroll [$100-$100m] (Default: ${50_000:,}): ',
             int(1e8), 100, 50_000)
-        self.min_bet = max(5, self.bankroll // 1000 // 1000 * 1000)
-        self.bet = self.initial_bet = self.num_round = 0
+        self.min_bet = max(5, self.br // 1000 // 1000 * 1000)
+        self.bet = self.b = self.num_round = 0
         self.play()
 
     def generate_shoe(self) -> Shoe:
@@ -165,60 +172,62 @@ class Blackjack:
 
     @staticmethod
     def get_i(msg: str, hi: int = 6, lo: int = 2, default: int = 6) -> int:
-        user_input = lo - 1
-        while not (lo <= user_input <= hi):
+        u_input = lo - 1
+        while not (lo <= u_input <= hi):
             try:
-                tmp = input(msg)
-                user_input = int(tmp) if tmp != '' else default
-                if not (lo <= user_input <= hi):
+                u_input = int(tmp) if (tmp := input(msg)) != '' else default
+                if not (lo <= u_input <= hi):
                     print('Input out of range. Please try again.')
             except ValueError:
                 print('Invalid input. Please try again.')
-        return user_input
+        return u_input
 
     @staticmethod
     def get_b(msg: str, opt: str = 'YN') -> bool:
-        user_input = '1'
-        while user_input.upper()[0] not in opt:
-            user_input = input(msg)
-            if user_input == '':
-                user_input = opt[0]
-        return user_input.upper().startswith('Y')
-
-    @staticmethod
-    def take_decision(hand: Hand, hnum: str, possibles: list[str]) -> None:
-        decision = ''
-        if hand.len() > 2:
-            del possibles[2:]
-        elif not hand.is_splittable():
-            del possibles[3:]
-        opt = '/'.join(c if i else c.upper() for i, c in enumerate(possibles))
-        while decision[:2].lower() not in possibles:
-            decision = input(f'Enter your decision {hnum}[{opt}]: ')
-            decision = possibles[0] if decision == '' else decision
-        hand.decision = decision
+        u_input = '1'
+        while u_input.upper()[0] not in opt:
+            u_input = opt[0] if (t := input(msg)) == '' else t
+        return u_input.upper().startswith('Y')
 
     def take_bet(self) -> None:
-        d = max(self.min_bet, self.bankroll // 1000 // 1000 * 10)
-        msg = f'Place your bet (Default: ${d}): '
-        self.bet = self.get_i(msg, self.bankroll, self.min_bet, d)
-        self.initial_bet = self.bet
-        self.bankroll -= self.bet
+        d = max(self.min_bet, self.br // 1000 // 1000 * 10)
+        var = f'(Default: ${d}, Min: ${self.min_bet}, Max: ${self.br})'
+        msg = f'Place your bet {var}: '
+        self.bet = self.get_i(msg, self.br, self.min_bet, d)
+        self.b = self.bet
+        self.br -= self.bet
 
-    def get_insurance_premium(self) -> int:
+    def take_insurance_premium(self) -> int:
         premium = 0
         if self.dealer.get_hand()[0].value == 11:
             if self.get_b('Do you want to take an insurance [y/N]? ', 'NY'):
-                premium = self.initial_bet // 2
-                self.bankroll -= premium
+                premium = self.b // 2
+                self.br -= premium
         return premium
+
+    def get_payout(self) -> int:
+        payout, dv, lp = 0, self.dealer.value, len(self.player)
+        for i, hand in enumerate(self.player):
+            n = f'Hand {i + 1}' if lp > 1 else 'You'
+            hv = hand.value
+            dd = self.b * (1 + (1 * (hand.decision == 'dd')))
+            if hand.is_busted() or hv < dv <= 21:
+                print(f'{n} lose')
+                continue
+            elif dv > 21 or hv > dv:
+                print('Dealer busted. ' * (dv > 21) + f'{n} win')
+                payout += dd * (2.5 if hand.is_blackjack() else 2)
+            elif dv == hv:
+                print('Tie')
+                payout += dd
+        return payout
 
     def print_board(self, rv: int = 22) -> None:
         self.cls()
         width = tsize()[0]
         print(f'Bet: {self.bet:,}'.ljust((w := width // 3))
               + f'Round {self.num_round}'.center(w)
-              + f'Bankroll: {self.bankroll:,}'.rjust(w))
+              + f'Bankroll: {self.br:,}'.rjust(w))
 
         dh = f': {" ".join([str(c) for c in self.dealer.get_hand()][:rv])}'
         dv = f' ({self.dealer.value})'
@@ -230,23 +239,6 @@ class Blackjack:
             print(f'\nPlayer{num}: {" ".join([str(c) for c in h.get_hand()])}'
                   f' ({h.value})')
             print('\n'.join([line for line in h.get_printable()]))
-
-    def get_payout(self) -> int:
-        payout, dv, lp = 0, self.dealer.value, len(self.player)
-        for i, hand in enumerate(self.player):
-            n = f'Hand {i + 1}' if lp > 1 else 'You'
-            hv = hand.value
-            dd = self.initial_bet * (1 + (1 * (hand.decision == 'dd')))
-            if hand.is_busted() or hv < dv <= 21:
-                print(f'{n} lose')
-                continue
-            elif dv > 21 or hv > dv:
-                print('Dealer busted. ' * (dv > 21) + f'{n} win')
-                payout += dd * (2.5 if hand.is_blackjack() else 2)
-            elif dv == hv:
-                print('Tie')
-                payout += dd
-        return payout
 
     def cls(self) -> None:
         if self.nt:
@@ -269,12 +261,12 @@ class Blackjack:
                 if not h.is_playable():
                     continue
                 self.print_board(rv=1)
-                h_num = f'(Hand {i + 1}) ' * (len(self.player) > 1)
-                self.take_decision(h, h_num, 'h s dd sp'.split())
+                o = 'h s'.split() + ['dd', 'sp'] * (self.br > self.b)
+                h.set_decision(f'(Hand {i + 1}) ' * (len(self.player) > 1), o)
                 if (d := h.decision) != 's':
                     if d in ('dd', 'sp'):
-                        self.bankroll -= self.initial_bet
-                        self.bet += self.initial_bet
+                        self.br -= self.b
+                        self.bet += self.b
                     if d == 'sp':
                         self.player += [Hand(c) for c in h.get_hand()]
                         del self.player[i]
@@ -284,7 +276,7 @@ class Blackjack:
         in_play = not all(hand.is_busted() for hand in self.player)
         self.print_board(rv=1)
         sleep(0.5)
-        premium = self.get_insurance_premium() if in_play else 0
+        premium = self.take_insurance_premium() if in_play else 0
         self.print_board()
 
         while self.dealer.value < 17 and in_play:
@@ -293,17 +285,20 @@ class Blackjack:
             self.print_board()
 
         payout = self.get_payout()
-        self.bankroll += payout
+        self.br += payout
         print(f'You received a payout of ${payout}')
         if premium and self.dealer.get_hand()[1].value == 10:
-            self.bankroll += premium * 2
+            self.br += premium * 2
             print(f'You received an insurance payout of ${premium * 2}')
 
     def play(self) -> None:
         more = True
-        while more and self.bankroll >= self.min_bet:
+        while more and self.br >= self.min_bet:
             self.num_round += 1
             self.round()
+            if self.br < self.min_bet:
+                print('Game over (insufficient bankroll)')
+                break
             more = self.get_b('Do you want to play more rounds [Y/n]? ', 'YN')
             if (ls := self.shoe.get_length()) < 15:
                 msg = f"Only {ls} cards left in dealer's shoe. "
