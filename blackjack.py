@@ -1,71 +1,48 @@
-from hashlib import sha512
 from random import shuffle, uniform
 from os import system, name, get_terminal_size as tsize
 from time import sleep
 
 
-class Card(object):
-    sdict = {'S': '♠', 'H': '♥', 'D': '♦', 'C': '♣'}
-    color = {'r': '\033[1;31;49m', 'w': '\033[1;37;49m'}
-
-    def __init__(self, suit, rank, uid, _hash):
+class Card:
+    def __init__(self, suit, rank):
         self.suit = suit
-        self.symbol = Card.sdict[suit[0]]
-        self.rank = rank
-        self.uid = uid
-        self._hash = _hash
-        self.is_red = self.suit[0] in 'HD'
-        self.value = 10 + (rank[0] == 'A') if rank.isalpha() else int(rank)
+        self.rank = self.c_rank = rank[0] if rank != '10' else rank
+        self.sr = self.suit + self.rank
+        if suit in '♥♦':
+            self.sr = '\033[1;31;49m' + self.sr + '\033[1;37;49m'
+            self.suit = '\033[1;31;49m' + self.suit + '\033[1;37;49m'
+            self.c_rank = '\033[1;31;49m' + self.c_rank + '\033[1;37;49m'
+        self.is_alpha = self.rank[0] in 'AJQK'
+        self.value = rank
 
     def __str__(self):
-        r = self.get_rank()
-        if self.is_red:
-            return Card.color['r'] + self.symbol + r + Card.color['w']
-        return self.symbol + r
+        return self.sr
 
-    def get_suit(self, colored=0) -> str:
-        if colored and self.is_red:
-            return Card.color['r'] + self.suit + Card.color['w']
-        return self.suit
+    @property
+    def value(self) -> int:
+        return self.__value
 
-    def get_symbol(self, colored=0) -> str:
-        if colored and self.is_red:
-            return Card.color['r'] + self.symbol + Card.color['w']
-        return self.symbol
+    @value.setter
+    def value(self, r: str) -> None:
+        self.__value = 10 + int(r[0] == 'A') if r.isalpha() else int(r)
 
-    def get_rank(self, colored=0) -> str:
-        r = self.rank[0] if self.rank != '10' else self.rank
-        if colored and self.is_red:
-            return Card.color['r'] + r + Card.color['w']
-        return r
-
-    def get_uid(self) -> int:
-        return self.uid
-
-    def get_hash(self) -> str:
-        return self._hash
-
-    def get_value(self) -> int:
-        return self.value
-
-    def display(self, hide=0) -> list[str]:
+    def display(self, hide: bool = False) -> list[str]:
         if hide:
             return ['┏━━━━━━━━━━━┓' if not i else
                     '┃███████████┃' if i != 10 else
                     '┗━━━━━━━━━━━┛' for i in range(11)]
-        pad = ' ' * (self.get_rank() != '10')
-        is_alpha = self.get_rank().isalpha()
-        sym, val = self.get_symbol(1) + ' ', self.get_value()
-        mid_cen = (sym * (val in (1, 3, 5, 9) or is_alpha)).ljust(2)
-        midside = (sym * (5 < val < 9)).ljust(2)
-        rdiff_1 = (sym * (val in (9, 10) and not is_alpha)).ljust(2)
-        row_2up = (sym * (val in (7, 8, 10) and not is_alpha)).ljust(2)
-        row_2dn = (sym * (val in (8, 10) and not is_alpha)).ljust(2)
-        corners = (sym * (val > 3 and not is_alpha)).ljust(2)
-        top_bot = (sym * (val in (2, 3))).ljust(2)
+        pad = ' ' * (self.rank != '10')
+        s, v = self.suit + ' ', self.value
+        mid_cen = (s * (v in (1, 3, 5, 9) or self.is_alpha)).ljust(2)
+        midside = (s * (5 < v < 9)).ljust(2)
+        rdiff_1 = (s * (v in (9, 10) and not self.is_alpha)).ljust(2)
+        row_2up = (s * (v in (7, 8, 10) and not self.is_alpha)).ljust(2)
+        row_2dn = (s * (v in (8, 10) and not self.is_alpha)).ljust(2)
+        corners = (s * (v > 3 and not self.is_alpha)).ljust(2)
+        top_bot = (s * (v in (2, 3))).ljust(2)
         return [
             '┏━━━━━━━━━━━┓',
-            '┃{}         ┃'.format(self.get_rank(1) + pad),
+            '┃{}         ┃'.format(self.c_rank + pad),
             '┃  {} {} {} ┃'.format(corners, top_bot, corners),
             '┃     {}    ┃'.format(row_2up),
             '┃  {}    {} ┃'.format(rdiff_1, rdiff_1),
@@ -73,14 +50,14 @@ class Card(object):
             '┃  {}    {} ┃'.format(rdiff_1, rdiff_1),
             '┃     {}    ┃'.format(row_2dn),
             '┃  {} {} {} ┃'.format(corners, top_bot, corners),
-            '┃         {}┃'.format(pad + self.get_rank(1)),
+            '┃         {}┃'.format(pad + self.c_rank),
             '┗━━━━━━━━━━━┛']
 
 
-class Shoe(object):
-    def __init__(self, num_decks=6, vb=False):
+class Shoe:
+    def __init__(self, num_decks: int = 6, vb: bool = False):
         print(f'Generating a dealing shoe with {num_decks} decks', end='')
-        self.shoe, self.last = [], 0
+        self.shoe = []
         self.build_shoe(num_decks)
 
         print('\nShuffling the cards...' if vb else '', end='')
@@ -94,13 +71,11 @@ class Shoe(object):
 
     def build_shoe(self, num_decks: int) -> None:
         for _ in range(num_decks):
-            for s in 'Spade Heart Diamond Club'.split():
+            for s in '♠ ♥ ♦ ♣'.split():
                 for r in 'Ace 2 3 4 5 6 7 8 9 10 Jack Queen King'.split():
-                    h = sha512((s + r + str(self.last)).encode('utf-8'))
-                    self.shoe.append(Card(s, r, self.last, h.hexdigest()))
-                    self.last += 1
+                    self.shoe.append(Card(s, r))
 
-    def cut_deck(self, minimum=0.30, maximum=0.50) -> None:
+    def cut_deck(self, minimum: float = 0.30, maximum: float = 0.50) -> None:
         cut = uniform(minimum, maximum)
         del self.shoe[:int(len(self.shoe) * cut)]
 
@@ -110,69 +85,67 @@ class Shoe(object):
     def get_length(self) -> int:
         return len(self.shoe)
 
-    def deal(self, num_cards=1) -> list[Card]:
-        return [self.shoe.pop(0) for _ in range(num_cards)]
+    def deal(self) -> Card:
+        return self.shoe.pop(0)
 
 
-class Hand(object):
-    def __init__(self, hand=None):
-        self.hand = [] if hand is None else hand
-        self.total_value = self.hand_value = self.num_aces = 0
-        if self.hand:
-            self.total_value = sum(c.get_value() for c in self.hand)
-            self.num_aces = sum(c.get_value() == 11 for c in self.hand)
-        self.set_hvalue()
+class Hand:
+    def __init__(self, card: Card = None):
+        self.hand = []
+        if card:
+            self.add_card(card)
         self.decision = ''
 
-    def add_cards(self, cards: list[Card]) -> None:
-        for card in cards:
-            self.hand.append(card)
-            self.total_value += (v := card.get_value())
-            self.num_aces += 1 if v == 11 else 0
-        self.set_hvalue()
+    def add_card(self, card: Card) -> None:
+        self.hand.append(card)
+        self.value = (sum(c.value for c in self.hand), 
+                      sum(c.value == 11 for c in self.hand))
 
     def get_hand(self) -> list[Card]:
         return self.hand
-
-    def get_printable(self, reveal=22) -> list[str]:
+        
+    def get_printable(self, reveal: int = 22) -> list[str]:
         cards = [c.display() if reveal > i else c.display(hide=True)
                  for i, c in enumerate(self.hand)]
         return ['   '.join(c[i] for c in cards) for i in range(len(cards[0]))]
 
-    def get_hvalue(self) -> int:
-        return self.hand_value
+    @property
+    def value(self) -> int:
+        return self.__value
 
-    def set_hvalue(self) -> None:
-        t, n = self.total_value, self.num_aces
+    @value.setter
+    def value(self, tn) -> None:
+        t, n = tn
         while t > 21 and n:
             t -= 10
             n -= 1
-        self.hand_value = t
+        self.__value = t
 
-    def get_decision(self) -> str:
-        return self.decision
+    @property
+    def decision(self) -> str:
+        return self.__decision
 
-    def set_decision(self, decision: str) -> None:
-        self.decision = decision
+    @decision.setter
+    def decision(self, decision: str) -> None:
+        self.__decision = decision
 
-    def length(self) -> int:
+    def len(self) -> int:
         return len(self.hand)
 
     def is_busted(self) -> bool:
-        return self.get_hvalue() > 21
+        return self.value > 21
 
     def is_blackjack(self) -> bool:
-        return self.length() == 2 and self.hand_value == 21
+        return self.len() == 2 and self.value == 21
 
     def is_playable(self) -> bool:
-        return not (self.get_hvalue() >= 21 or self.decision in ('s', 'dd'))
+        return self.value < 21 and self.decision not in ('s', 'dd')
 
     def is_splittable(self) -> bool:
-        return self.length() == 2 and (self.hand[0].get_value()
-                                       == self.hand[1].get_value())
+        return self.len() == 2 and (self.hand[0].value == self.hand[1].value)
 
 
-class Blackjack(object):
+class Blackjack:
     def __init__(self):
         self.nt = name == 'nt'
         self.cls()
@@ -183,8 +156,6 @@ class Blackjack(object):
             int(1e8), 100, 50_000)
         self.min_bet = max(5, self.bankroll // 1000 // 1000 * 1000)
         self.bet = self.initial_bet = self.num_round = 0
-        self.dealer = Hand()
-        self.player = [Hand()]
         self.play()
 
     def generate_shoe(self) -> Shoe:
@@ -193,9 +164,9 @@ class Blackjack(object):
         return Shoe(self.get_i(msg, 12, 2, d), vb=True)
 
     @staticmethod
-    def get_i(msg: str, hi=6, lo=2, default=6) -> int:
+    def get_i(msg: str, hi: int = 6, lo: int = 2, default: int = 6) -> int:
         user_input = lo - 1
-        while user_input < lo or user_input > hi:
+        while not (lo <= user_input <= hi):
             try:
                 tmp = input(msg)
                 user_input = int(tmp) if tmp != '' else default
@@ -206,7 +177,7 @@ class Blackjack(object):
         return user_input
 
     @staticmethod
-    def get_b(msg: str, opt='YN') -> bool:
+    def get_b(msg: str, opt: str = 'YN') -> bool:
         user_input = '1'
         while user_input.upper()[0] not in opt:
             user_input = input(msg)
@@ -217,7 +188,7 @@ class Blackjack(object):
     @staticmethod
     def take_decision(hand: Hand, hnum: str, possibles: list[str]) -> None:
         decision = ''
-        if hand.length() > 2:
+        if hand.len() > 2:
             del possibles[2:]
         elif not hand.is_splittable():
             del possibles[3:]
@@ -225,7 +196,7 @@ class Blackjack(object):
         while decision[:2].lower() not in possibles:
             decision = input(f'Enter your decision {hnum}[{opt}]: ')
             decision = possibles[0] if decision == '' else decision
-        hand.set_decision(decision)
+        hand.decision = decision
 
     def take_bet(self) -> None:
         d = max(self.min_bet, self.bankroll // 1000 // 1000 * 10)
@@ -236,13 +207,13 @@ class Blackjack(object):
 
     def get_insurance_premium(self) -> int:
         premium = 0
-        if self.dealer.get_hand()[0].get_rank().startswith('A'):
+        if self.dealer.get_hand()[0].value == 11:
             if self.get_b('Do you want to take an insurance [y/N]? ', 'NY'):
                 premium = self.initial_bet // 2
                 self.bankroll -= premium
         return premium
 
-    def print_board(self, rv=22) -> None:
+    def print_board(self, rv: int = 22) -> None:
         self.cls()
         width = tsize()[0]
         print(f'Bet: {self.bet:,}'.ljust((w := width // 3))
@@ -250,28 +221,28 @@ class Blackjack(object):
               + f'Bankroll: {self.bankroll:,}'.rjust(w))
 
         dh = f': {" ".join([str(c) for c in self.dealer.get_hand()][:rv])}'
-        dv = f' ({self.dealer.get_hvalue()})'
+        dv = f' ({self.dealer.value})'
         print(f'\n\nDealer{(rv > 0) * dh}{(rv > 1) * dv}')
         print('\n'.join([line for line in self.dealer.get_printable(rv)]))
 
         for i, h in enumerate(self.player):
             num = f' (Hand {i + 1})' * (len(self.player) > 1)
             print(f'\nPlayer{num}: {" ".join([str(c) for c in h.get_hand()])}'
-                  f' ({h.get_hvalue()})')
+                  f' ({h.value})')
             print('\n'.join([line for line in h.get_printable()]))
 
     def get_payout(self) -> int:
-        payout, dv, lp = 0, self.dealer.get_hvalue(), len(self.player)
-        for i, h in enumerate(self.player):
+        payout, dv, lp = 0, self.dealer.value, len(self.player)
+        for i, hand in enumerate(self.player):
             n = f'Hand {i + 1}' if lp > 1 else 'You'
-            hv = h.get_hvalue()
-            dd = self.initial_bet * 1 + (1 * (h.get_decision() == 'dd'))
-            if h.is_busted() or hv < dv <= 21:
+            hv = hand.value
+            dd = self.initial_bet * (1 + (1 * (hand.decision == 'dd')))
+            if hand.is_busted() or hv < dv <= 21:
                 print(f'{n} lose')
                 continue
-            if dv > 21 or hv > dv:
+            elif dv > 21 or hv > dv:
                 print('Dealer busted. ' * (dv > 21) + f'{n} win')
-                payout += dd * (2.5 if h.is_blackjack() else 2)
+                payout += dd * (2.5 if hand.is_blackjack() else 2)
             elif dv == hv:
                 print('Tie')
                 payout += dd
@@ -286,41 +257,45 @@ class Blackjack(object):
     def round(self) -> None:
         self.cls()
         self.take_bet()
-        self.dealer.__init__(self.shoe.deal(2))
-        self.player = [Hand(self.shoe.deal(2))]
+        self.dealer, self.player = Hand(), [Hand()]
+        for _ in range(2):
+            self.player[0].add_card(self.shoe.deal())
+            self.dealer.add_card(self.shoe.deal())
+            sleep(0.2)
+            self.print_board(rv=1)
 
         while any(hand.is_playable() for hand in self.player):
             for i, h in enumerate(self.player):
                 if not h.is_playable():
                     continue
-                self.print_board(rv=0)
+                self.print_board(rv=1)
                 h_num = f'(Hand {i + 1}) ' * (len(self.player) > 1)
                 self.take_decision(h, h_num, 'h s dd sp'.split())
-                if (d := h.get_decision()) != 's':
+                if (d := h.decision) != 's':
                     if d in ('dd', 'sp'):
                         self.bankroll -= self.initial_bet
                         self.bet += self.initial_bet
                     if d == 'sp':
-                        self.player += [Hand([c]) for c in h.get_hand()]
+                        self.player += [Hand(c) for c in h.get_hand()]
                         del self.player[i]
                         break
-                    h.add_cards(self.shoe.deal(1))
+                    h.add_card(self.shoe.deal())
 
-        in_play = not all(h.is_busted() for h in self.player)
+        in_play = not all(hand.is_busted() for hand in self.player)
         self.print_board(rv=1)
         sleep(0.5)
         premium = self.get_insurance_premium() if in_play else 0
         self.print_board()
 
-        while self.dealer.get_hvalue() < 17 and in_play:
-            self.dealer.add_cards(self.shoe.deal(1))
+        while self.dealer.value < 17 and in_play:
+            self.dealer.add_card(self.shoe.deal())
             sleep(0.5)
             self.print_board()
 
         payout = self.get_payout()
         self.bankroll += payout
         print(f'You received a payout of ${payout}')
-        if premium and self.dealer.get_hand()[1].get_value() == 10:
+        if premium and self.dealer.get_hand()[1].value == 10:
             self.bankroll += premium * 2
             print(f'You received an insurance payout of ${premium * 2}')
 
